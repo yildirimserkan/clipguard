@@ -1,6 +1,6 @@
 //! Terminal-style picker window.
 //!
-//!   ↑/↓ select · Enter paste · Shift+Enter copy only · Ctrl+P pin · Shift+Del delete · Esc hide
+//!   ↑/↓ select · Enter paste · Shift+Enter copy only · Ctrl+P pin · Del (⌘⌫ on Mac) delete · Esc hide
 //!   Hotkey toggles the window: Ctrl+` (Windows/Linux), Cmd+Shift+C (macOS)
 
 use crate::engine::{Core, ItemView, SECRET_TTL_SECS};
@@ -73,6 +73,8 @@ impl Theme {
 
 pub struct ClipApp {
     theme: Theme,
+    /// Row under the mouse in the previous frame (shows its × delete button).
+    hover_id: Option<i64>,
     core: Arc<Mutex<Core>>,
     query: String,
     selected: usize,
@@ -120,6 +122,7 @@ impl ClipApp {
 
         Self {
             theme,
+            hover_id: None,
             core,
             query: String::new(),
             selected: 0,
@@ -223,7 +226,13 @@ impl eframe::App for ClipApp {
                 i.consume_key(Modifiers::NONE, Key::Enter),
                 i.consume_key(Modifiers::SHIFT, Key::Enter),
                 i.consume_key(Modifiers::COMMAND, Key::P),
-                i.consume_key(Modifiers::SHIFT, Key::Delete),
+                // Delete the selected clip, like Ditto. Not Shift+Del: on Windows the
+                // window toolkit turns that into "Cut" before we ever see the key.
+                if cfg!(target_os = "macos") {
+                    i.consume_key(Modifiers::COMMAND, Key::Backspace)
+                } else {
+                    i.consume_key(Modifiers::NONE, Key::Delete)
+                },
                 i.consume_key(Modifiers::NONE, Key::Escape),
                 i.consume_key(Modifiers::COMMAND, Key::Q),
             )
@@ -256,6 +265,12 @@ impl eframe::App for ClipApp {
             }
             if pin { core.toggle_pin(id); }
             if del { core.delete(id); }
+            if pin || del {
+                // Data changed this frame: rebuild the filtered view before drawing,
+                // otherwise rows point past the end of the shortened list.
+                let version = core.version;
+                self.refilter(&core.items, version);
+            }
         }
         let total = core.items.len();
         let paused = core.paused;
@@ -340,7 +355,7 @@ impl ClipApp {
             // ---- footer (also a drag handle)
             ui.separator();
             let footer = ui.horizontal(|ui| {
-                let keys = "↑↓ select · enter paste · shift+enter copy · ^P pin · shift+del delete · esc hide";
+                let keys = "↑↓ select · enter paste · shift+enter copy · ^P pin · del delete · esc hide";
                 ui.label(RichText::new(keys).color(DIM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     match self.hotkey {
@@ -597,22 +612,40 @@ impl ClipApp {
                 }
                 let now = now_ms();
                 let mut clicked: Option<(usize, bool)> = None;
+                let mut new_hover: Option<i64> = None;
+                let mut delete_id: Option<i64> = None;
                 for (row, &idx) in self.filtered.iter().enumerate() {
                     let it = &core.items[idx];
                     let sel = row == self.selected;
-                    let resp = egui::Frame::new()
-                        .fill(if sel { ACCENT } else { Color32::TRANSPARENT })
+                    let hovered = self.hover_id == Some(it.id);
+                    let inner = egui::Frame::new()
+                        .fill(if sel { ACCENT } else if hovered { FILL } else { Color32::TRANSPARENT })
                         .corner_radius(8.0)
                         .inner_margin(egui::Margin::symmetric(8, 5))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| apple_row(ui, it, sel, now));
-                        })
-                        .response
-                        .interact(egui::Sense::click());
+                            ui.horizontal(|ui| apple_row(ui, it, sel, hovered, now)).inner
+                        });
+                    let x_rect = inner.inner;
+                    let resp = inner.response.interact(egui::Sense::click());
+                    if resp.hovered() { new_hover = Some(it.id); }
                     if sel && (up || down) { resp.scroll_to_me(None); }
-                    if resp.double_clicked() { clicked = Some((row, true)); }
+                    // A click on the × deletes; anywhere else selects / pastes.
+                    let on_x = x_rect
+                        .zip(resp.interact_pointer_pos())
+                        .is_some_and(|(r, p)| r.expand(2.0).contains(p));
+                    if resp.clicked() && on_x { delete_id = Some(it.id); }
+                    else if resp.double_clicked() { clicked = Some((row, true)); }
                     else if resp.clicked() { clicked = Some((row, false)); }
+                }
+                if self.hover_id != new_hover {
+                    self.hover_id = new_hover;
+                    ctx.request_repaint();
+                }
+                if let Some(id) = delete_id {
+                    core.delete(id);
+                    self.hover_id = None;
+                    clicked = None;
                 }
                 if let Some((row, paste_now)) = clicked {
                     self.selected = row;
@@ -636,7 +669,7 @@ impl ClipApp {
                 keycap(ui, "⇧↵", "Copy");
                 // Platform-correct key names (⌘/⌫ only exist on Mac keyboards).
                 keycap(ui, if cfg!(target_os = "macos") { "⌘P" } else { "Ctrl P" }, "Pin");
-                keycap(ui, if cfg!(target_os = "macos") { "⇧⌫" } else { "⇧Del" }, "Delete");
+                keycap(ui, if cfg!(target_os = "macos") { "⌘⌫" } else { "Del" }, "Delete");
                 keycap(ui, "esc", "Close");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     match self.hotkey {
@@ -658,10 +691,30 @@ impl ClipApp {
     }
 }
 
-fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, now: i64) {
+/// Draws one row. When hovered, a × delete button replaces the right-hand info;
+/// returns its rect so the caller can tell a delete click from a select click.
+fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, hovered: bool, now: i64) -> Option<egui::Rect> {
     use apple::*;
     let primary = if sel { Color32::WHITE } else { LABEL };
     let secondary = if sel { Color32::from_white_alpha(200) } else { SECONDARY };
+    let mut x_rect = None;
+    let mut delete_button = |ui: &mut egui::Ui| {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+        let hot = resp.hovered();
+        let bg = match (sel, hot) {
+            (true, true) => Color32::from_white_alpha(90),
+            (true, false) => Color32::from_white_alpha(45),
+            (false, true) => Color32::from_rgb(0xff, 0x45, 0x3a),
+            (false, false) => STROKE,
+        };
+        ui.painter().circle_filled(rect.center(), 11.0, bg);
+        let c = rect.center();
+        let stroke = egui::Stroke::new(1.6, Color32::WHITE);
+        ui.painter().line_segment([c + egui::vec2(-4.0, -4.0), c + egui::vec2(4.0, 4.0)], stroke);
+        ui.painter().line_segment([c + egui::vec2(4.0, -4.0), c + egui::vec2(-4.0, 4.0)], stroke);
+        resp.on_hover_text("Delete");
+        x_rect = Some(rect);
+    };
 
     if let Some(kind) = it.secret {
         badge(ui, "●", ORANGE, sel);
@@ -670,9 +723,10 @@ fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, now: i64) {
         ui.label(RichText::new(kind).size(13.0).color(if sel { Color32::WHITE } else { ORANGE }));
         let left = (SECRET_TTL_SECS * 1000 - (now - it.last_used_at)).max(0) / 1000;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if hovered { delete_button(ui); ui.add_space(6.0); }
             ui.label(RichText::new(format!("Clears in {}:{:02}", left / 60, left % 60)).size(12.0).color(secondary));
         });
-        return;
+        return x_rect;
     }
 
     let (glyph, color) = kind(&it.text);
@@ -681,6 +735,7 @@ fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, now: i64) {
     let (preview, extra) = preview(&it.text);
     ui.add(egui::Label::new(RichText::new(preview).size(14.0).color(primary)).truncate());
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if hovered { delete_button(ui); ui.add_space(6.0); }
         ui.label(RichText::new(age(now - it.last_used_at)).size(12.0).color(secondary));
         if it.pinned {
             ui.label(RichText::new("Pinned").font(semibold(11.0)).color(if sel { Color32::WHITE } else { ACCENT }));
@@ -689,4 +744,5 @@ fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, now: i64) {
             ui.label(RichText::new(format!("{} lines", extra + 1)).size(12.0).color(secondary));
         }
     });
+    x_rect
 }

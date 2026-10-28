@@ -1,6 +1,6 @@
 [package]
 name = "clipguard"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Secure, cross-platform clipboard manager (Ditto alternative)"
 repository = "https://github.com/yildirimserkan/clipguard"
