@@ -1,0 +1,90 @@
+name: release
+
+# Push a tag like v0.1.0 -> builds all packages and publishes a GitHub Release.
+# Manual run (Actions -> release -> Run workflow) builds the packages without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+          - os: macos-latest
+            target: macos-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Version (from Cargo.toml, must match the tag)
+        id: ver
+        shell: bash
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$v" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $v"; exit 1
+          fi
+
+      - name: Linux deps (X11)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxcb-xfixes0-dev
+
+      - run: cargo test
+      - run: cargo build --release
+
+      - name: Package (Windows - portable zip + MSI)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target\release\clipguard.exe -DestinationPath "dist\clipguard-$v-windows-x64-portable.zip"
+          dotnet tool install --global wix --version 5.0.2
+          wix build wix\main.wxs -arch x64 -d Version=$v -o "dist\clipguard-$v-x64.msi"
+
+      - name: Package (macOS / Linux - tar.gz)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          mkdir -p dist
+          tar -C target/release -czf "dist/clipguard-$v-${{ matrix.target }}.tar.gz" clipguard
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: pkg-${{ matrix.target }}
+          path: dist/*
+
+  publish:
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  clipguard MSI (WiX v5).
+  Per-machine install into Program Files: suits Intune / GPO / SCCM deployment.
+    msiexec /i clipguard-<ver>-x64.msi /qn
+  Start-at-login is NOT set here: each user opts in from the tray menu (HKCU).
+
+  Build (CI): wix build wix\main.wxs -arch x64 -d Version=<x.y.z> -o clipguard.msi
+  UpgradeCode must never change: it links all versions for in-place upgrades.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="clipguard"
+      Manufacturer="Serkan Yildirim"
+      Version="$(Version)"
+      UpgradeCode="B5879819-08F1-4BDB-853E-71E6C388E892"
+      Scope="perMachine"
+      Compressed="yes">
+
+    <SummaryInformation Description="clipguard - secure clipboard manager" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of clipguard is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="assets\clipguard.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/yildirimserkan/clipguard" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="clipguard">
+        <Component Id="MainExe" Bitness="always64">
+          <File Id="ClipguardExe" Source="target\release\clipguard.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Bitness="always64">
+        <Shortcut
+            Id="ClipguardShortcut"
+            Name="clipguard"
+            Description="Secure clipboard manager"
+            Target="[INSTALLFOLDER]clipguard.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon" />
+        <RegistryValue Root="HKLM" Key="Software\clipguard" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="clipguard">
+      <ComponentRef Id="MainExe" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

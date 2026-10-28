@@ -1,4 +1,4 @@
-//! App icon, drawn in code (no binary assets): dark rounded square, green `>_` prompt.
+// App icon, drawn in code (no binary assets): dark rounded square, green `>_` prompt.
 
 const BG: [u8; 3] = [0x0b, 0x0e, 0x14];
 const BORDER: [u8; 3] = [0x30, 0x36, 0x3d];
