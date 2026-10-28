@@ -55,6 +55,7 @@ jobs:
           Compress-Archive -Path target\release\clipguard.exe -DestinationPath "dist\clipguard-$v-windows-x64-portable.zip"
           dotnet tool install --global wix --version 5.0.2
           wix build wix\main.wxs -arch x64 -d Version=$v -o "dist\clipguard-$v-x64.msi"
+          Remove-Item dist\*.wixpdb -ErrorAction SilentlyContinue
 
       - name: Package (macOS / Linux - tar.gz)
         if: runner.os != 'Windows'
