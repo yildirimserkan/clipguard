@@ -1,12 +1,15 @@
 // Release builds on Windows: no console window.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod engine;
+mod autostart;
 mod crypto;
+mod engine;
+mod icon;
 mod markers;
 mod paste;
 mod secrets;
 mod storage;
+mod tray;
 mod ui;
 mod watcher;
 
@@ -45,6 +48,11 @@ fn main() {
             .with_min_inner_size([480.0, 240.0])
             .with_decorations(false)
             .with_always_on_top()
+            .with_taskbar(false) // lives in the tray, like Ditto
+            .with_icon({
+                let (rgba, width, height) = icon::rgba(64);
+                Arc::new(egui::IconData { rgba, width, height })
+            })
             .with_visible(!start_hidden),
         centered: true,
         ..Default::default()

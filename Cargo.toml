@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 aes-gcm = "0.11.1"
 arboard = "3.7.0"
+auto-launch = "0.6.0"
 base64 = "0.23.1"
 clipboard-master = "4.1.0"
 directories = "6.0.0"
@@ -20,6 +21,7 @@ rand = "0.10.3"
 regex = "1.13.1"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
 sha2 = "0.11.1"
+tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 zeroize = "1.9.1"
 
 # Password-manager marker detection (src/markers.rs)

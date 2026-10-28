@@ -5,6 +5,8 @@
 
 use crate::engine::{Core, ItemView, SECRET_TTL_SECS};
 use crate::paste;
+use crate::tray::{self, Action, Tray};
+use crate::autostart;
 use crate::storage::now_ms;
 use eframe::egui::{self, Color32, Key, Modifiers, RichText};
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -48,6 +50,8 @@ pub struct ClipApp {
     visible: bool,
     hotkey_ok: bool,
     _hotkeys: Option<GlobalHotKeyManager>,
+    tray: Option<Tray>,
+    tray_queue: Arc<Mutex<Vec<Action>>>,
 }
 
 impl ClipApp {
@@ -73,6 +77,9 @@ impl ClipApp {
             }));
         }
 
+        let tray_queue = Arc::new(Mutex::new(Vec::new()));
+        let tray = tray::build(&cc.egui_ctx, tray_queue.clone(), hotkey_label());
+
         Self {
             core,
             query: String::new(),
@@ -84,6 +91,8 @@ impl ClipApp {
             visible: true,
             hotkey_ok,
             _hotkeys: manager,
+            tray,
+            tray_queue,
         }
     }
 
@@ -135,7 +144,26 @@ impl ClipApp {
 
 impl eframe::App for ClipApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.toggle_request.swap(false, Ordering::SeqCst) {
+        let mut toggle = self.toggle_request.swap(false, Ordering::SeqCst);
+        let actions: Vec<Action> = std::mem::take(&mut *self.tray_queue.lock().unwrap_or_else(|p| p.into_inner()));
+        for a in actions {
+            match a {
+                Action::Toggle => toggle = !toggle,
+                Action::PauseClicked => {
+                    let on = self.tray.as_ref().map(|t| t.pause_checked()).unwrap_or(false);
+                    self.core.lock().unwrap_or_else(|p| p.into_inner()).paused = on;
+                    ctx.request_repaint();
+                }
+                Action::AutostartClicked => {
+                    if let Some(t) = &self.tray {
+                        let actual = autostart::set(t.autostart_checked());
+                        t.set_autostart_checked(actual);
+                    }
+                }
+                Action::Quit => std::process::exit(0),
+            }
+        }
+        if toggle {
             if self.visible { self.hide(ctx) } else { self.show(ctx) }
         }
         // Closing the window hides it; the app keeps guarding the clipboard.
@@ -191,6 +219,7 @@ impl eframe::App for ClipApp {
             if del { core.delete(id); }
         }
         let total = core.items.len();
+        let paused = core.paused;
 
         egui::Frame::new().fill(BG).inner_margin(12.0).show(ui, |ui| {
             // ---- prompt
@@ -262,6 +291,9 @@ impl eframe::App for ClipApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let hk = if self.hotkey_ok { hotkey_label() } else { "no hotkey" };
                     ui.label(RichText::new(format!("{total} items · aes-256-gcm · {hk}")).color(DIM).small());
+                    if paused {
+                        ui.label(RichText::new("⏸ capture paused ·").color(AMBER).small());
+                    }
                 });
             });
         });

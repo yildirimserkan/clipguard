@@ -36,6 +36,8 @@ pub struct Core {
     pub items: Vec<ItemView>,
     /// Bumped on every change so the UI can cache its filtered list.
     pub version: u64,
+    /// Capture paused from the tray: new clips are ignored (timers keep running).
+    pub paused: bool,
 }
 
 pub struct Startup {
@@ -54,7 +56,7 @@ impl Core {
 
         let purged = store.purge_secrets(SECRET_TTL_SECS).unwrap_or(0)
             + store.purge(DEFAULT_MAX_AGE_SECS, DEFAULT_MAX_ITEMS).unwrap_or(0);
-        let mut core = Core { store, clipboard, pending: Vec::new(), items: Vec::new(), version: 0 };
+        let mut core = Core { store, clipboard, pending: Vec::new(), items: Vec::new(), version: 0, paused: false };
         let undecryptable = core.refresh();
         Ok((core, Startup { db: path.display().to_string(), purged, undecryptable }))
     }
@@ -86,6 +88,7 @@ impl Core {
     pub fn on_event(&mut self, ev: Event) {
         match ev {
             Event::Skipped(why) => println!("[skip] password manager marker: {why} (not stored)"),
+            Event::Clip(_) if self.paused => {}
             Event::Clip(text) => {
                 let kind = secrets::detect(&text);
                 if let Err(e) = self.store.insert(&text, kind.is_some()) {
