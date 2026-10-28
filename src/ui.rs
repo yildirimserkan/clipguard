@@ -28,15 +28,31 @@ const BLUE: Color32 = Color32::from_rgb(0x79, 0xc0, 0xff);
 const PREVIEW_CHARS: usize = 72;
 const MAX_ROWS: usize = 500; // render cap; search narrows further
 
-pub fn hotkey() -> HotKey {
+/// Hotkeys tried in order; the first one the OS lets us register wins.
+/// (Ctrl+` is Ditto's default: if Ditto is still running it holds that key.)
+fn hotkey_candidates() -> Vec<(HotKey, &'static str)> {
     #[cfg(target_os = "macos")]
-    return HotKey::new(Some(HkMods::SUPER | HkMods::SHIFT), Code::KeyC);
+    return vec![
+        (HotKey::new(Some(HkMods::META | HkMods::SHIFT), Code::KeyC), "Cmd+Shift+C"),
+        (HotKey::new(Some(HkMods::CONTROL | HkMods::SHIFT), Code::KeyV), "Ctrl+Shift+V"),
+    ];
     #[cfg(not(target_os = "macos"))]
-    return HotKey::new(Some(HkMods::CONTROL), Code::Backquote);
+    return vec![
+        (HotKey::new(Some(HkMods::CONTROL), Code::Backquote), "Ctrl+`"),
+        (HotKey::new(Some(HkMods::CONTROL | HkMods::SHIFT), Code::Backquote), "Ctrl+Shift+`"),
+        (HotKey::new(Some(HkMods::META | HkMods::SHIFT), Code::KeyV), "Win+Shift+V"),
+    ];
 }
 
-pub fn hotkey_label() -> &'static str {
-    if cfg!(target_os = "macos") { "Cmd+Shift+C" } else { "Ctrl+`" }
+/// Registers the first free candidate. Returns its label, or None.
+fn register_hotkey(manager: &GlobalHotKeyManager) -> Option<&'static str> {
+    for (hk, label) in hotkey_candidates() {
+        match manager.register(hk) {
+            Ok(()) => return Some(label),
+            Err(e) => eprintln!("[ui] hotkey {label} unavailable: {e}"),
+        }
+    }
+    None
 }
 
 pub struct ClipApp {
@@ -48,7 +64,7 @@ pub struct ClipApp {
     matcher: SkimMatcherV2,
     toggle_request: Arc<AtomicBool>,
     visible: bool,
-    hotkey_ok: bool,
+    hotkey: Option<&'static str>,
     _hotkeys: Option<GlobalHotKeyManager>,
     tray: Option<Tray>,
     tray_queue: Arc<Mutex<Vec<Action>>>,
@@ -62,9 +78,10 @@ impl ClipApp {
         // Hotkey manager must live on the main (event-loop) thread.
         let toggle_request = Arc::new(AtomicBool::new(false));
         let manager = GlobalHotKeyManager::new().ok();
-        let hotkey_ok = manager.as_ref().map(|m| m.register(hotkey()).is_ok()).unwrap_or(false);
-        if !hotkey_ok {
-            eprintln!("[ui] global hotkey {} unavailable (Wayland or already taken)", hotkey_label());
+        let hotkey = manager.as_ref().and_then(register_hotkey);
+        match hotkey {
+            Some(label) => println!("[clipguard] {label} toggles the window"),
+            None => eprintln!("[ui] no global hotkey available (Wayland, or all taken); use the tray icon"),
         }
         {
             let flag = toggle_request.clone();
@@ -78,7 +95,7 @@ impl ClipApp {
         }
 
         let tray_queue = Arc::new(Mutex::new(Vec::new()));
-        let tray = tray::build(&cc.egui_ctx, tray_queue.clone(), hotkey_label());
+        let tray = tray::build(&cc.egui_ctx, tray_queue.clone(), hotkey.unwrap_or("tray only"));
 
         Self {
             core,
@@ -89,7 +106,7 @@ impl ClipApp {
             matcher: SkimMatcherV2::default().ignore_case(),
             toggle_request,
             visible: true,
-            hotkey_ok,
+            hotkey,
             _hotkeys: manager,
             tray,
             tray_queue,
@@ -224,8 +241,13 @@ impl eframe::App for ClipApp {
         egui::Frame::new().fill(BG).inner_margin(12.0).show(ui, |ui| {
             // ---- prompt
             ui.horizontal(|ui| {
-                ui.label(RichText::new("clipguard").color(GREEN).strong());
-                ui.label(RichText::new("❯").color(GREEN));
+                // The "clipguard ❯" label is the window's drag handle (no title bar).
+                let handle = ui
+                    .add(egui::Label::new(RichText::new("clipguard ❯").color(GREEN).strong()).sense(egui::Sense::drag()))
+                    .on_hover_cursor(egui::CursorIcon::Grab);
+                if handle.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
                 let edit = egui::TextEdit::singleline(&mut self.query)
                     .hint_text(RichText::new("search…").color(DIM))
                     .frame(egui::Frame::NONE)
@@ -242,7 +264,7 @@ impl eframe::App for ClipApp {
             ui.separator();
 
             // ---- list
-            let footer_h = 22.0;
+            let footer_h = 30.0;
             let list_h = ui.available_height() - footer_h;
             egui::ScrollArea::vertical()
                 .max_height(list_h)
@@ -283,19 +305,26 @@ impl eframe::App for ClipApp {
                     }
                 });
 
-            // ---- footer
+            // ---- footer (also a drag handle)
             ui.separator();
-            ui.horizontal(|ui| {
-                let keys = "↑↓ select  enter paste  shift+enter copy  ^P pin  shift+del delete  esc hide";
-                ui.label(RichText::new(keys).color(DIM).small());
+            let footer = ui.horizontal(|ui| {
+                let keys = "↑↓ select · enter paste · shift+enter copy · ^P pin · shift+del delete · esc hide";
+                ui.label(RichText::new(keys).color(DIM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let hk = if self.hotkey_ok { hotkey_label() } else { "no hotkey" };
-                    ui.label(RichText::new(format!("{total} items · aes-256-gcm · {hk}")).color(DIM).small());
+                    match self.hotkey {
+                        Some(hk) => ui.label(RichText::new(hk).color(GREEN)),
+                        None => ui.label(RichText::new("no hotkey: use tray").color(AMBER)),
+                    };
+                    ui.label(RichText::new(format!("{total} items · aes-256-gcm ·")).color(DIM));
                     if paused {
-                        ui.label(RichText::new("⏸ capture paused ·").color(AMBER).small());
+                        ui.label(RichText::new("capture paused ·").color(AMBER));
                     }
                 });
             });
+            let drag = ui.interact(footer.response.rect, ui.scope_id().with("footer_drag"), egui::Sense::drag());
+            if drag.drag_started() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
         });
     }
 }
@@ -357,6 +386,9 @@ fn apply_style(ctx: &egui::Context) {
         fonts.families.insert(egui::FontFamily::Proportional, mono);
     }
     ctx.set_fonts(fonts);
+
+    // Labels are not text-selectable: dragging the window must not highlight text.
+    ctx.all_styles_mut(|style| style.interaction.selectable_labels = false);
 
     let mut v = egui::Visuals::dark();
     v.panel_fill = BG;

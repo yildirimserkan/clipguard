@@ -44,8 +44,8 @@ fn main() {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("clipguard")
-            .with_inner_size([760.0, 460.0])
-            .with_min_inner_size([480.0, 240.0])
+            .with_inner_size([920.0, 520.0])
+            .with_min_inner_size([640.0, 280.0])
             .with_decorations(false)
             .with_always_on_top()
             .with_taskbar(false) // lives in the tray, like Ditto
@@ -57,7 +57,6 @@ fn main() {
         centered: true,
         ..Default::default()
     };
-    println!("[clipguard] {} toggles the window", ui::hotkey_label());
 
     let res = eframe::run_native(
         "clipguard",
