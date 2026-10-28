@@ -117,6 +117,10 @@ cargo test
 ```
 Linux build deps: `libxcb1-dev libxcb-xfixes0-dev`.
 
+## Support
+
+clipguard is free. If it saves you time, you can [sponsor it on GitHub](https://github.com/sponsors/yildirimserkan).
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
