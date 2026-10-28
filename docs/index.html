@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clipguard — a clipboard manager that doesn't leak your secrets</title>
+<meta name="description" content="Searchable clipboard history for Windows, macOS and Linux. Encrypted at rest, secrets auto-expire, password managers respected, no network. Open source, MIT.">
+<meta property="og:title" content="clipguard">
+<meta property="og:description" content="A clipboard manager that doesn't leak your secrets. Encrypted history, secrets wiped after 120 s, no network.">
+<meta property="og:image" content="https://yildirimserkan.github.io/clipguard/screenshot.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --panel: #1c1c1e;
+    --panel-2: #2c2c2e;
+    --stroke: #3a3a3c;
+    --label: #f5f5f7;
+    --secondary: #a1a1a6;
+    --tertiary: #6e6e73;
+    --accent: #0a84ff;
+    --orange: #ff9f0a;
+    --green: #30d158;
+    --radius: 14px;
+    --max: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--label);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, kbd, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 16px; }
+
+  /* nav */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(11, 11, 13, .72);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  nav .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--label); font-weight: 600; font-size: 17px; }
+  .brand img { width: 26px; height: 26px; }
+  .brand:hover { text-decoration: none; }
+  nav .links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; }
+  nav .links a { color: var(--secondary); }
+  nav .links a:hover { color: var(--label); text-decoration: none; }
+  @media (max-width: 640px) { nav .links a.opt { display: none; } }
+
+  /* hero */
+  .hero { text-align: center; padding-top: 88px; padding-bottom: 40px; }
+  .hero .icon { width: 96px; height: 96px; filter: drop-shadow(0 10px 30px rgba(10,132,255,.25)); }
+  h1 { font-size: clamp(38px, 7vw, 64px); line-height: 1.05; letter-spacing: -.02em; margin: 24px 0 14px; font-weight: 700; }
+  .hero p.lead { font-size: clamp(18px, 2.4vw, 22px); color: var(--secondary); max-width: 680px; margin: 0 auto 32px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 980px; font-weight: 600; font-size: 16px;
+    border: 1px solid transparent; transition: background .15s, border-color .15s;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #2b95ff; }
+  .btn.ghost { color: var(--label); border-color: var(--stroke); }
+  .btn.ghost:hover { border-color: var(--secondary); }
+  .meta { margin-top: 14px; color: var(--tertiary); font-size: 13px; }
+
+  .shot { margin: 56px auto 0; max-width: 920px; }
+  .shot img {
+    width: 100%; height: auto; display: block;
+    border-radius: var(--radius);
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.06);
+  }
+
+  /* sections */
+  section.wrap { padding-top: 96px; }
+  h2 { font-size: clamp(28px, 4.5vw, 40px); letter-spacing: -.015em; margin: 0 0 10px; text-align: center; }
+  .sub { text-align: center; color: var(--secondary); max-width: 640px; margin: 0 auto 40px; font-size: 18px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid rgba(255,255,255,.06); border-radius: var(--radius); padding: 22px; }
+  .card .badge {
+    width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
+    font-weight: 700; font-size: 15px; margin-bottom: 14px;
+  }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--secondary); font-size: 15px; }
+  .b-blue { background: rgba(10,132,255,.18); color: var(--accent); }
+  .b-orange { background: rgba(255,159,10,.18); color: var(--orange); }
+  .b-green { background: rgba(48,209,88,.18); color: var(--green); }
+  .b-purple { background: rgba(191,90,242,.18); color: #bf5af2; }
+  .b-teal { background: rgba(48,176,199,.18); color: #30b0c7; }
+  .b-gray { background: rgba(142,142,147,.18); color: #8e8e93; }
+
+  /* comparison */
+  .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid rgba(255,255,255,.06); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); font-size: 15px; min-width: 560px; }
+  th, td { padding: 14px 18px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
+  th { color: var(--secondary); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: 0; }
+  td.bad { color: var(--secondary); }
+  td.good { color: var(--label); }
+  td.good::before { content: "✓ "; color: var(--green); font-weight: 700; }
+
+  /* security */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .card ul { margin: 10px 0 0; padding-left: 18px; color: var(--secondary); font-size: 15px; }
+  .card li { margin: 6px 0; }
+  .card h3.ok { color: var(--green); }
+  .card h3.warn { color: var(--orange); }
+
+  /* download */
+  .dl .card h3 { display: flex; align-items: center; gap: 10px; }
+  .dl .card .files { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .dl .card a.file {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--panel-2); padding: 10px 14px; border-radius: 10px; color: var(--label); font-size: 14px;
+  }
+  .dl .card a.file:hover { text-decoration: none; background: #3a3a3c; }
+  .dl .card a.file span { color: var(--tertiary); font-size: 12px; }
+  pre {
+    background: #0f0f11; border: 1px solid rgba(255,255,255,.06); border-radius: 10px;
+    padding: 12px 14px; overflow-x: auto; font-size: 13px; color: #d1d1d6; margin: 12px 0 0;
+  }
+  .note { color: var(--tertiary); font-size: 13px; margin-top: 10px; }
+
+  /* keys */
+  kbd {
+    display: inline-block; min-width: 24px; padding: 2px 7px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--stroke); border-bottom-width: 2px;
+    color: var(--label); font-size: 13px; text-align: center; line-height: 1.5;
+  }
+
+  /* donate */
+  .donate { text-align: center; }
+  .donate .card { max-width: 640px; margin: 0 auto; padding: 36px 28px; }
+  .donate .heart { font-size: 34px; }
+
+  footer.wrap { padding-top: 88px; padding-bottom: 48px; }
+  footer { color: var(--tertiary); font-size: 13px; text-align: center; }
+  footer a { color: var(--secondary); }
+  footer p { margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.png" alt="">clipguard</a>
+    <div class="links">
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#security">Security</a>
+      <a href="#download">Download</a>
+      <a href="#donate" id="donate-nav" hidden>Donate</a>
+      <a href="https://github.com/yildirimserkan/clipguard">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <img class="icon" src="icon.png" alt="clipguard icon">
+  <h1>Your clipboard history.<br>Without the leaks.</h1>
+  <p class="lead">Searchable clipboard history like you're used to, built security-first: encrypted at rest, secrets wiped after 120 seconds, password managers respected, no network at all.</p>
+  <div class="cta">
+    <a class="btn primary" id="dl-primary" href="https://github.com/yildirimserkan/clipguard/releases/latest">Download</a>
+    <a class="btn ghost" href="https://github.com/yildirimserkan/clipguard">View source</a>
+  </div>
+  <div class="meta" id="dl-meta">Windows · macOS · Linux — free and open source (MIT)</div>
+  <div class="shot"><img src="screenshot.png" alt="clipguard window with clipboard history, a masked GitHub token and a pinned link" width="920" height="520"></div>
+</header>
+
+<section id="features" class="wrap">
+  <h2>Everything you copy. One keystroke away.</h2>
+  <p class="sub">Open it with a hotkey, type a few letters, press Enter. It pastes straight into the app you were using.</p>
+  <div class="grid">
+    <div class="card"><div class="badge b-blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></div><h3>Instant fuzzy search</h3><p>Find that SQL query from three weeks ago by typing a few letters of it.</p></div>
+    <div class="card"><div class="badge b-gray">↵</div><h3>Keyboard first</h3><p>Hotkey, arrows, Enter to paste into the previous app. Shift+Enter just copies.</p></div>
+    <div class="card"><div class="badge b-purple">{ }</div><h3>Made for developers</h3><p>Code, links and text get their own badges. Multi-line clips show their line count.</p></div>
+    <div class="card"><div class="badge b-teal">◆</div><h3>Pin what you reuse</h3><p>Pinned clips are kept. Everything else is kept for 90 days or 10,000 clips.</p></div>
+    <div class="card"><div class="badge b-orange">●</div><h3>Secrets handled</h3><p>Tokens, API keys and passwords are masked on screen and wiped after 120 seconds.</p></div>
+    <div class="card"><div class="badge b-green">⚑</div><h3>Ready for teams</h3><p>Per-machine MSI with silent install for Intune or GPO. Start-at-login stays a per-user choice.</p></div>
+  </div>
+</section>
+
+<section id="compare" class="wrap">
+  <h2>Why another clipboard manager?</h2>
+  <p class="sub">Classic clipboard managers keep everything you copy, forever, in plain text: passwords and API keys included.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Typical clipboard manager</th><th>clipguard</th></tr></thead>
+      <tbody>
+        <tr><td>History on disk</td><td class="bad">Plain-text database</td><td class="good">AES-256-GCM, key in the OS keystore</td></tr>
+        <tr><td>Tokens, keys, passwords</td><td class="bad">Kept forever</td><td class="good">Detected, deleted after 120 s, clipboard wiped</td></tr>
+        <tr><td>Password managers</td><td class="bad">Often recorded anyway</td><td class="good">Respected, never stored</td></tr>
+        <tr><td>Network</td><td class="bad">Optional sync, open port</td><td class="good">None: no sockets, no telemetry</td></tr>
+        <tr><td>Duplicate detection</td><td class="bad">Plain hash reveals what was copied</td><td class="good">Keyed HMAC</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="security" class="wrap">
+  <h2>An honest security model</h2>
+  <p class="sub">What clipguard protects, and what it doesn't. Full details in the <a href="https://github.com/yildirimserkan/clipguard#security-model">README</a>.</p>
+  <div class="two">
+    <div class="card">
+      <h3 class="ok">Protected</h3>
+      <ul>
+        <li>Every clip encrypted with AES-256-GCM and bound to its row, so tampering is detected.</li>
+        <li>Random master key kept only in Windows Credential Manager, macOS Keychain or Linux Secret Service. No keystore, no start: never a key file.</li>
+        <li>Deleted clips overwritten on disk. Unix permissions 0600/0700.</li>
+        <li>Password-manager markers honoured on all three platforms.</li>
+        <li>No network code at all.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="warn">Not protected</h3>
+      <ul>
+        <li>Malware running as your user can ask the keystore for the key, just like clipguard does.</li>
+        <li>Timestamps and pin/secret flags stay readable, so cleanup works without decrypting.</li>
+        <li>Secret detection is pattern-based: unknown formats are stored as normal clips.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="download" class="wrap dl">
+  <h2>Download</h2>
+  <p class="sub" id="dl-version">Latest release from GitHub.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Windows</h3>
+      <div class="files">
+        <a class="file" data-asset="-x64.msi" href="https://github.com/yildirimserkan/clipguard/releases/latest">Installer (.msi) <span>x64</span></a>
+        <a class="file" data-asset="-windows-x64-portable.zip" href="https://github.com/yildirimserkan/clipguard/releases/latest">Portable (.zip) <span>no install</span></a>
+      </div>
+      <pre>msiexec /i clipguard-&lt;version&gt;-x64.msi /qn</pre>
+      <p class="note">Not code-signed yet: SmartScreen may warn. More info → Run anyway.</p>
+    </div>
+    <div class="card">
+      <h3>macOS</h3>
+      <div class="files">
+        <a class="file" data-asset="-macos-arm64.tar.gz" href="https://github.com/yildirimserkan/clipguard/releases/latest">Apple Silicon (.tar.gz) <span>arm64</span></a>
+      </div>
+      <pre>tar -xzf clipguard-*-macos-arm64.tar.gz
+xattr -d com.apple.quarantine clipguard
+./clipguard</pre>
+      <p class="note">Auto-paste needs Accessibility permission.</p>
+    </div>
+    <div class="card">
+      <h3>Linux</h3>
+      <div class="files">
+        <a class="file" data-asset="-linux-x64.tar.gz" href="https://github.com/yildirimserkan/clipguard/releases/latest">x64 (.tar.gz) <span>X11</span></a>
+      </div>
+      <pre>tar -xzf clipguard-*-linux-x64.tar.gz
+./clipguard</pre>
+      <p class="note">Needs a Secret Service keyring (GNOME Keyring, KWallet, KeePassXC).</p>
+    </div>
+  </div>
+  <p class="note" style="text-align:center;margin-top:18px">Verify downloads with <a data-asset="SHA256SUMS.txt" href="https://github.com/yildirimserkan/clipguard/releases/latest">SHA256SUMS.txt</a>.</p>
+</section>
+
+<section id="shortcuts" class="wrap">
+  <h2>Shortcuts</h2>
+  <p class="sub">The active hotkey is always shown in the window's footer.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Action</th><th>Windows / Linux</th><th>macOS</th></tr></thead>
+      <tbody>
+        <tr><td>Open / hide</td><td><kbd>Ctrl</kbd> <kbd>`</kbd></td><td><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>C</kbd></td></tr>
+        <tr><td>Paste into previous app</td><td><kbd>Enter</kbd></td><td><kbd>↵</kbd></td></tr>
+        <tr><td>Copy only</td><td><kbd>Shift</kbd> <kbd>Enter</kbd></td><td><kbd>⇧</kbd> <kbd>↵</kbd></td></tr>
+        <tr><td>Pin / unpin</td><td><kbd>Ctrl</kbd> <kbd>P</kbd></td><td><kbd>⌘</kbd> <kbd>P</kbd></td></tr>
+        <tr><td>Delete</td><td><kbd>Del</kbd> or hover → ×</td><td><kbd>⌘</kbd> <kbd>⌫</kbd> or hover → ×</td></tr>
+        <tr><td>Hide</td><td><kbd>Esc</kbd></td><td><kbd>esc</kbd></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="donate" class="wrap donate" hidden>
+  <div class="card">
+    <div class="heart">♥</div>
+    <h2 style="margin-top:8px">Support clipguard</h2>
+    <p class="sub" style="margin-bottom:24px">clipguard is free and always will be. If it saves you time, a small donation helps pay for code signing and keeps development going.</p>
+    <a class="btn primary" id="donate-btn" href="DONATE_URL">Donate</a>
+  </div>
+</section>
+
+<footer class="wrap">
+  <p>clipguard is open source under the <a href="https://github.com/yildirimserkan/clipguard/blob/main/LICENSE">MIT licence</a> · made by <a href="https://serkanyildirim.tr">Serkan Yildirim</a></p>
+  <p><a href="https://github.com/yildirimserkan/clipguard/issues">Report an issue</a> · <a href="https://github.com/yildirimserkan/clipguard/releases">All releases</a></p>
+  <p>Not affiliated with Ditto or any other clipboard manager.</p>
+</footer>
+
+<script>
+// Point download links at the actual files of the latest release.
+// Falls back to the releases page if the API is unreachable or rate-limited.
+(async () => {
+  try {
+    const r = await fetch("https://api.github.com/repos/yildirimserkan/clipguard/releases/latest");
+    if (!r.ok) return;
+    const rel = await r.json();
+    const assets = rel.assets || [];
+    const find = (suffix) => assets.find((a) => a.name.endsWith(suffix));
+
+    document.querySelectorAll("[data-asset]").forEach((el) => {
+      const a = find(el.dataset.asset);
+      if (a) el.href = a.browser_download_url;
+    });
+    const v = (rel.tag_name || "").replace(/^v/, "");
+    if (v) document.getElementById("dl-version").textContent = "Version " + v + " — latest release.";
+
+    // Primary button: pick the right file for the visitor's OS.
+    const ua = navigator.userAgent;
+    const [suffix, label] =
+      /Windows/.test(ua) ? ["-x64.msi", "Download for Windows"] :
+      /Mac/.test(ua) ? ["-macos-arm64.tar.gz", "Download for macOS"] :
+      /Linux/.test(ua) && !/Android/.test(ua) ? ["-linux-x64.tar.gz", "Download for Linux"] :
+      [null, null];
+    const a = suffix && find(suffix);
+    if (a) {
+      const btn = document.getElementById("dl-primary");
+      btn.href = a.browser_download_url;
+      btn.textContent = label;
+      document.getElementById("dl-meta").textContent =
+        "Version " + v + " · Also for other platforms below · MIT";
+    }
+  } catch (_) { /* keep static links */ }
+})();
+</script>
+</body>
+</html>
