@@ -1,0 +1,31 @@
+[package]
+name = "clipguard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.11.1"
+arboard = "3.7.0"
+base64 = "0.23.1"
+clipboard-master = "4.1.0"
+directories = "6.0.0"
+hex = "0.4.3"
+hmac = "0.13.0"
+keyring = "4.2.0"
+rand = "0.10.3"
+regex = "1.13.1"
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+sha2 = "0.11.1"
+zeroize = "1.9.1"
+
+# Password-manager marker detection (src/markers.rs)
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = "0.13"
