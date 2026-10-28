@@ -1,10 +1,12 @@
-name: release
+name: build
 
-# Push a tag like v0.1.0 -> builds all packages and publishes a GitHub Release.
-# Manual run (Actions -> release -> Run workflow) builds the packages without publishing.
+# Every push / PR: test + build all packages (downloadable as run artifacts).
+# Tag like v0.1.0: same, then publishes a GitHub Release with the packages.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
