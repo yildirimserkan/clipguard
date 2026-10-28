@@ -53,7 +53,8 @@ fn main() {
                 let (rgba, width, height) = icon::rgba(64);
                 Arc::new(egui::IconData { rgba, width, height })
             })
-            .with_visible(!start_hidden),
+            .with_visible(!start_hidden)
+            .with_transparent(ui::Theme::from_env() == ui::Theme::Apple),
         centered: true,
         ..Default::default()
     };

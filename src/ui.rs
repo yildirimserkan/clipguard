@@ -55,7 +55,24 @@ fn register_hotkey(manager: &GlobalHotKeyManager) -> Option<&'static str> {
     None
 }
 
+/// Visual theme. Apple-style is the default; CLIPGUARD_THEME=terminal for the old look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Terminal,
+    Apple,
+}
+
+impl Theme {
+    pub fn from_env() -> Self {
+        match std::env::var("CLIPGUARD_THEME").as_deref() {
+            Ok("terminal") => Theme::Terminal,
+            _ => Theme::Apple,
+        }
+    }
+}
+
 pub struct ClipApp {
+    theme: Theme,
     core: Arc<Mutex<Core>>,
     query: String,
     selected: usize,
@@ -72,7 +89,11 @@ pub struct ClipApp {
 
 impl ClipApp {
     pub fn new(cc: &eframe::CreationContext<'_>, core: Arc<Mutex<Core>>, ctx_slot: Arc<OnceLock<egui::Context>>) -> Self {
-        apply_style(&cc.egui_ctx);
+        let theme = Theme::from_env();
+        match theme {
+            Theme::Terminal => apply_style(&cc.egui_ctx),
+            Theme::Apple => apple::apply_style(&cc.egui_ctx),
+        }
         let _ = ctx_slot.set(cc.egui_ctx.clone());
 
         // Hotkey manager must live on the main (event-loop) thread.
@@ -98,6 +119,7 @@ impl ClipApp {
         let tray = tray::build(&cc.egui_ctx, tray_queue.clone(), hotkey.unwrap_or("tray only"));
 
         Self {
+            theme,
             core,
             query: String::new(),
             selected: 0,
@@ -238,6 +260,16 @@ impl eframe::App for ClipApp {
         let total = core.items.len();
         let paused = core.paused;
 
+        match self.theme {
+            Theme::Terminal => self.draw_terminal(ui, &ctx, &mut core, up, down, total, paused),
+            Theme::Apple => self.draw_apple(ui, &ctx, &mut core, up, down, total, paused),
+        }
+    }
+}
+
+impl ClipApp {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_terminal(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, core: &mut Core, up: bool, down: bool, total: usize, paused: bool) {
         egui::Frame::new().fill(BG).inner_margin(12.0).show(ui, |ui| {
             // ---- prompt
             ui.horizontal(|ui| {
@@ -420,4 +452,241 @@ mod tests {
         assert_eq!(age(7_200_000), "2h");
         assert_eq!(age(172_800_000), "2d");
     }
+}
+
+// =====================================================================================
+// Apple-style theme (Spotlight-like). Inter font (OFL) stands in for SF Pro, whose
+// licence does not allow bundling it in a cross-platform app.
+// =====================================================================================
+mod apple {
+    use super::*;
+
+    pub const PANEL: Color32 = Color32::from_rgba_premultiplied(0x1c, 0x1c, 0x1e, 0xf5);
+    pub const STROKE: Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3c);
+    pub const LABEL: Color32 = Color32::from_rgb(0xf5, 0xf5, 0xf7);
+    pub const SECONDARY: Color32 = Color32::from_rgb(0x8e, 0x8e, 0x93);
+    pub const TERTIARY: Color32 = Color32::from_rgb(0x63, 0x63, 0x66);
+    pub const ACCENT: Color32 = Color32::from_rgb(0x0a, 0x84, 0xff);
+    pub const ORANGE: Color32 = Color32::from_rgb(0xff, 0x9f, 0x0a);
+    pub const FILL: Color32 = Color32::from_rgb(0x2c, 0x2c, 0x2e);
+    pub const RADIUS: u8 = 14;
+
+    pub fn apply_style(ctx: &egui::Context) {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "inter".into(),
+            Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Regular.ttf"))),
+        );
+        fonts.font_data.insert(
+            "inter-semibold".into(),
+            Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-SemiBold.ttf"))),
+        );
+        fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "inter".into());
+        fonts.families.insert(egui::FontFamily::Name("semibold".into()), vec!["inter-semibold".into(), "inter".into()]);
+        ctx.set_fonts(fonts);
+
+        ctx.all_styles_mut(|style| {
+            style.interaction.selectable_labels = false;
+            let v = &mut style.visuals;
+            *v = egui::Visuals::dark();
+            v.panel_fill = Color32::TRANSPARENT;
+            v.window_fill = PANEL;
+            v.extreme_bg_color = Color32::TRANSPARENT;
+            v.override_text_color = Some(LABEL);
+            v.selection.bg_fill = ACCENT.gamma_multiply(0.5);
+            v.text_cursor.stroke = egui::Stroke::new(2.0, ACCENT);
+            v.widgets.noninteractive.bg_stroke.color = STROKE;
+        });
+    }
+
+    pub fn semibold(size: f32) -> egui::FontId {
+        egui::FontId::new(size, egui::FontFamily::Name("semibold".into()))
+    }
+
+    /// Kind of clip, for the small badge on the left.
+    pub fn kind(text: &str) -> (&'static str, Color32) {
+        let t = text.trim_start();
+        if t.starts_with("http://") || t.starts_with("https://") {
+            ("↗", Color32::from_rgb(0x30, 0xb0, 0xc7))
+        } else if t.contains('\n') || t.contains(';') || t.contains('{') || t.starts_with('$') {
+            ("{ }", Color32::from_rgb(0xbf, 0x5a, 0xf2))
+        } else {
+            ("Aa", Color32::from_rgb(0x8e, 0x8e, 0x93))
+        }
+    }
+
+    /// Rounded badge with a short glyph in it.
+    pub fn badge(ui: &mut egui::Ui, glyph: &str, color: Color32, selected: bool) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+        let bg = if selected { Color32::from_white_alpha(40) } else { color.gamma_multiply(0.22) };
+        let fg = if selected { Color32::WHITE } else { color };
+        ui.painter().rect_filled(rect, 7.0, bg);
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, semibold(12.0), fg);
+    }
+
+    /// Keycap-style hint: [↵] Paste
+    pub fn keycap(ui: &mut egui::Ui, key: &str, label: &str) {
+        let galley = ui.painter().layout_no_wrap(key.into(), egui::FontId::proportional(13.0), LABEL);
+        let size = egui::vec2(galley.size().x.max(14.0) + 14.0, 24.0);
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        ui.painter().rect_filled(rect, 6.0, FILL);
+        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, LABEL);
+        ui.label(RichText::new(label).size(14.0).color(SECONDARY));
+        ui.add_space(14.0);
+    }
+
+    /// Magnifier icon drawn with the painter (no icon font needed).
+    pub fn magnifier(ui: &mut egui::Ui) -> egui::Response {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::drag());
+        let c = rect.center() - egui::vec2(2.0, 2.0);
+        let stroke = egui::Stroke::new(2.0, SECONDARY);
+        ui.painter().circle_stroke(c, 7.0, stroke);
+        ui.painter().line_segment([c + egui::vec2(5.0, 5.0), c + egui::vec2(10.0, 10.0)], stroke);
+        resp
+    }
+}
+
+impl ClipApp {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_apple(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, core: &mut Core, up: bool, down: bool, total: usize, paused: bool) {
+        use apple::*;
+        let full = ui.max_rect();
+        // Rounded, slightly translucent panel (the window itself is transparent).
+        ui.painter().rect(full.shrink(1.0), RADIUS, PANEL, egui::Stroke::new(1.0, STROKE), egui::StrokeKind::Inside);
+
+        egui::Frame::new().inner_margin(egui::Margin { left: 18, right: 18, top: 16, bottom: 12 }).show(ui, |ui| {
+            // ---- search field (large, Spotlight-like); the magnifier is the drag handle
+            ui.horizontal(|ui| {
+                let handle = magnifier(ui).on_hover_cursor(egui::CursorIcon::Grab);
+                if handle.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                ui.add_space(6.0);
+                let edit = egui::TextEdit::singleline(&mut self.query)
+                    .hint_text(RichText::new("Search clipboard").size(22.0).color(TERTIARY))
+                    .font(egui::FontId::proportional(22.0))
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY)
+                    .text_color(LABEL);
+                let r = ui.add(edit);
+                let window_focused = ui.ctx().input(|i| i.viewport().focused.unwrap_or(false));
+                if window_focused && !r.has_focus() { r.request_focus(); }
+                if r.changed() { self.selected = 0; }
+            });
+            ui.add_space(10.0);
+            let y = ui.cursor().top();
+            ui.painter().hline(full.x_range().shrink(1.0), y, egui::Stroke::new(1.0, STROKE));
+            ui.add_space(8.0);
+
+            // ---- section label
+            let section = if self.query.trim().is_empty() { "Recent" } else { "Results" };
+            ui.label(RichText::new(section).font(semibold(12.0)).color(SECONDARY));
+            ui.add_space(4.0);
+
+            // ---- list
+            let footer_h = 50.0;
+            let list_h = ui.available_height() - footer_h;
+            egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                if self.filtered.is_empty() {
+                    ui.add_space(24.0);
+                    ui.vertical_centered(|ui| {
+                        let msg = if total == 0 { "Copy something to get started" } else { "No Results" };
+                        ui.label(RichText::new(msg).size(15.0).color(SECONDARY));
+                    });
+                }
+                let now = now_ms();
+                let mut clicked: Option<(usize, bool)> = None;
+                for (row, &idx) in self.filtered.iter().enumerate() {
+                    let it = &core.items[idx];
+                    let sel = row == self.selected;
+                    let resp = egui::Frame::new()
+                        .fill(if sel { ACCENT } else { Color32::TRANSPARENT })
+                        .corner_radius(8.0)
+                        .inner_margin(egui::Margin::symmetric(8, 5))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| apple_row(ui, it, sel, now));
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if sel && (up || down) { resp.scroll_to_me(None); }
+                    if resp.double_clicked() { clicked = Some((row, true)); }
+                    else if resp.clicked() { clicked = Some((row, false)); }
+                }
+                if let Some((row, paste_now)) = clicked {
+                    self.selected = row;
+                    if paste_now {
+                        let id = core.items[self.filtered[row]].id;
+                        if core.copy(id) {
+                            self.toggle_request.store(true, Ordering::SeqCst);
+                            paste::paste_into_previous_app();
+                            ctx.request_repaint();
+                        }
+                    }
+                }
+            });
+
+            // ---- footer: keycaps left, status right (also a drag handle)
+            let y = ui.cursor().top() + 4.0;
+            ui.painter().hline(full.x_range().shrink(1.0), y, egui::Stroke::new(1.0, STROKE));
+            ui.add_space(16.0);
+            let footer = ui.horizontal(|ui| {
+                keycap(ui, "↵", "Paste");
+                keycap(ui, "⇧↵", "Copy");
+                // Platform-correct key names (⌘/⌫ only exist on Mac keyboards).
+                keycap(ui, if cfg!(target_os = "macos") { "⌘P" } else { "Ctrl P" }, "Pin");
+                keycap(ui, if cfg!(target_os = "macos") { "⇧⌫" } else { "⇧Del" }, "Delete");
+                keycap(ui, "esc", "Close");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    match self.hotkey {
+                        Some(hk) => ui.label(RichText::new(hk).size(14.0).color(LABEL)),
+                        None => ui.label(RichText::new("No hotkey").size(14.0).color(ORANGE)),
+                    };
+                    ui.label(RichText::new("·").size(14.0).color(TERTIARY));
+                    ui.label(RichText::new(format!("{total} items · Encrypted")).size(14.0).color(SECONDARY));
+                    if paused {
+                        ui.label(RichText::new("Paused ·").size(14.0).color(ORANGE));
+                    }
+                });
+            });
+            let drag = ui.interact(footer.response.rect, ui.scope_id().with("apple_footer_drag"), egui::Sense::drag());
+            if drag.drag_started() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        });
+    }
+}
+
+fn apple_row(ui: &mut egui::Ui, it: &ItemView, sel: bool, now: i64) {
+    use apple::*;
+    let primary = if sel { Color32::WHITE } else { LABEL };
+    let secondary = if sel { Color32::from_white_alpha(200) } else { SECONDARY };
+
+    if let Some(kind) = it.secret {
+        badge(ui, "●", ORANGE, sel);
+        ui.add_space(6.0);
+        ui.label(RichText::new("••••••••••").size(14.0).color(primary));
+        ui.label(RichText::new(kind).size(13.0).color(if sel { Color32::WHITE } else { ORANGE }));
+        let left = (SECRET_TTL_SECS * 1000 - (now - it.last_used_at)).max(0) / 1000;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(format!("Clears in {}:{:02}", left / 60, left % 60)).size(12.0).color(secondary));
+        });
+        return;
+    }
+
+    let (glyph, color) = kind(&it.text);
+    badge(ui, glyph, color, sel);
+    ui.add_space(6.0);
+    let (preview, extra) = preview(&it.text);
+    ui.add(egui::Label::new(RichText::new(preview).size(14.0).color(primary)).truncate());
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(RichText::new(age(now - it.last_used_at)).size(12.0).color(secondary));
+        if it.pinned {
+            ui.label(RichText::new("Pinned").font(semibold(11.0)).color(if sel { Color32::WHITE } else { ACCENT }));
+        }
+        if extra > 0 {
+            ui.label(RichText::new(format!("{} lines", extra + 1)).size(12.0).color(secondary));
+        }
+    });
 }
