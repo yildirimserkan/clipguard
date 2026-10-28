@@ -3,7 +3,7 @@
 **A clipboard manager that doesn't leak your secrets.**
 Searchable clipboard history like Ditto, built security-first: encrypted at rest, secrets auto-expire, password managers respected, no network at all.
 
-Windows · macOS · Linux — written in Rust.
+Windows · macOS · Linux — written in Rust. · **[Website](https://yildirimserkan.github.io/clipguard/)**
 
 ![clipguard](docs/screenshot.png)
 
