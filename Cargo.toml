@@ -5,6 +5,7 @@ edition = "2024"
 description = "Secure, cross-platform clipboard manager (Ditto alternative)"
 repository = "https://github.com/yildirimserkan/clipguard"
 authors = ["Serkan Yildirim"]
+license = "MIT"
 
 [dependencies]
 aes-gcm = "0.11.1"
